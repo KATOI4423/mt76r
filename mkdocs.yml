@@ -1,0 +1,56 @@
+site_name: mt76r 教本
+site_description: MediaTek MT7922 Linux Wi-Fi ドライバを題材にした Rust 学習教材
+site_url: https://KATOI4423.github.io/mt76r/
+repo_url: https://github.com/KATOI4423/mt76r
+repo_name: KATOI4423/mt76r
+
+# Markdown の教材を静的 HTML に変換します。
+# docs/README.md をサイトのトップページとして使います。
+docs_dir: docs/mt7922-rust-driver-textbook
+site_dir: site
+
+theme:
+  name: material
+  language: ja
+strict: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+nav:
+  - 教本トップ: README.md
+  - ソースコードの読み方: 00-source-map.md
+  - 開発環境: 01-environment.md
+  - 実装フェーズ:
+      - Phase 1 — PCIe probe: phases/phase01-pcie-probe.md
+      - Phase 2 — BAR / MMIO: phases/phase02-bar-mmio.md
+      - Phase 3 — DMA: phases/phase03-dma.md
+      - Phase 4 — Firmware: phases/phase04-firmware.md
+      - Phase 5 — MCU communication: phases/phase05-mcu.md
+      - Phase 6 — mac80211: phases/phase06-mac80211.md
+      - Phase 7 — RX: phases/phase07-rx.md
+      - Phase 8 — TX: phases/phase08-tx.md
+      - Phase 9 — Scan: phases/phase09-scan.md
+      - Phase 10 — Association: phases/phase10-association.md
+  - デバッグ: 11-debugging.md
+  - Rust 設計: 12-rust-design.md
+  - 実験チェックリスト: 13-lab-checklist.md
+  - 調査の進め方: 14-reading-strategy.md
+  - 最終アーキテクチャ: 15-final-architecture.md
+  - 参考資料: 16-references.md
+  - ソース調査ワークシート: 17-source-worksheet.md
+  - プロジェクト構成: 18-project-layout.md
