@@ -36,3 +36,19 @@ rustc-ice-*.txt
 Module.symvers
 modules.order
 rust-project.json
+
+# python scripts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+.envrc
+.venv/
+env/
+venv/
+ENV/
+
+# rust-analyzer
+.vscode/settings.json
+.zed/settings.json
