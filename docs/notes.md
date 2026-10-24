@@ -6,9 +6,10 @@
 
 ```
 ./Makefile
-  └ make -C $KDIR M=$PWD
+  └ make -C $KDIR M=$PWD Mo=$OUT
     │ -C $KDIR: カーネルのビルドディレクトリの Makefile を実行する
-    │ -M=$PWD: 「外部モジュールを $PWD でビルドする」ことを指定（KBUILD_EXTMOD）
+    │ M=$PWD: 「外部モジュールを $PWD でビルドする」ことを指定（KBUILD_EXTMOD）
+    │ MO=$OUT: 生成物を出力するディレクトリを指定（Kernel 6.13以降の方法）
     ▼
   $KDIR/Makefile
     │ M=... があると、デフォルトターゲットが modules になる
