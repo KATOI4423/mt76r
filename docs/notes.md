@@ -28,7 +28,7 @@
 
 ### Kbuild
 
-```
+``` bash
 # SPDX-License-Identifier: GPL-2.0
 
 obj-m := rust_out_of_tree.o
@@ -41,3 +41,26 @@ obj-m := rust_out_of_tree.o
  - Rust では `foo.rs` に `mod bar` を記述することで、 `bar.rs` が自動で読み込まれる。
    そのため、 `obj-m` の指定は `foo.o` だけで良い。
  - 別のモジュールを作る場合は、 `obj-m += hoge.o` と追加していく。
+
+#### 複合オブジェクト指定
+
+``` bash
+# SPDX-License-Identifier: GPL-2.0
+
+obj-m := mt76r.o        # mt76.ko というモジュールを作る
+mt76r-y := src/lib.o    # mt76.o はsrc/lib.o から作る
+```
+
+ - `<name>-y` には、そのモジュールを構成するオブジェクトファイルを列挙する。
+   kbuild はこれらを順番にビルドし、 `ld -r` で1つのモジュールにリンクして、`.ko` に仕上げる。
+ - `mt76r.rs` や `mt76r.c` など、同名のソースコードがある場合は、 `-y` を書かなくても単体でビルドされる。
+   `-y` を書くのは、元になるファイルの名前がモジュール名と違う場合や、複数ファイルから作る場合である。
+
+#### Tips
+
+`CONFIG_...` と組み合わせて、特定の `CONFIG_...` が有効（=y）のときだけソースコードを追加するという方法ができる。
+
+``` Makefile
+# CONFIG_FOO_DEBUG=y のとき、 foo-y に展開され、 kbuild からリンクされる
+foo-$(CONFIG_FOO_DEBUG) += debug.o
+```
