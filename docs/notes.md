@@ -66,6 +66,8 @@ mt76r-y := src/lib.o    # mt76.o はsrc/lib.o から作る
 foo-$(CONFIG_FOO_DEBUG) += debug.o
 ```
 
+---
+
 ### Rust for Linux out-of-tree モジュールのビルド問題メモ
 
 **環境**: Ubuntu、カーネル `7.0.0-38-generic`
@@ -102,3 +104,79 @@ readlink -f /lib/modules/$(uname -r)/build/rust
 - out-of-tree の Rust ビルドでは、**カーネルをビルドした rustc と完全に同じ rustc** が必要 (rustup 版では不可)。
 - **カーネルをビルドしたコンパイラ (gcc/clang) に合わせる**。Ubuntu のカーネルなら gcc なので `LLVM=1` は付けない。
 - `RUST_LIB_SRC` や `rust-src` は、`rust/` がビルド済みの out-of-tree では不要。
+
+---
+
+## 01-environment.md
+
+### 0.1 PCI デバイスを確認
+
+```bash
+$ lspci -nnk
+...
+06:00.0 Network controller [0280]: MEDIATEK Corp. MT7922 802.11ax PCI Express Wireless Network Adapter [14c3:0616]
+        Subsystem: Foxconn International, Inc. Device [105b:e0db]
+        Kernel driver in use: mt7921e
+        Kernel modules: mt7921e
+...
+```
+
+#### バス番号
+
+`06:00.0` の `06` の部分（`:` の前の番号）。16進数で 00~ff までの値を取る。
+`バス(Bus)` とは、CPU、メモリ、GPU、ストレージなど、コンピュータ内部の各部品を接続し、
+データのやり取りを行う共通の伝送路のこと。
+
+#### デバイス番号
+
+`06:00.0` の `00` の部分（`:` と `.` の間の番号）。16進数で 00~1f までの値を取る。
+バス上のスロットやデバイスを示す番号。
+
+#### ファンクション番号
+
+`06:00.0` の `0` の部分（`.` の後の番号）。0~7の値を取る。
+1つのデバイスが複数の機能（例えば、サウンドとネットワークの統合カードなど）を持つ場合、それらを区別するための番号。
+
+#### デバイスクラス
+
+`Network controller [0280]` の部分。どんなデバイスなのかの種類を示す。
+`[0280]` はデバイスクラスコードと呼ばれ、4桁の16進数で分類される。
+
+例:
+ - 0000: Non-VGA unclassified device (非VGA非クラスデバイス)
+ - 0108: Non-Volatile memory controller (不揮発性メモリコントローラ)
+ - 0200: Ethernet controller (イーサネットコントローラ)
+
+#### ベンダー
+
+`MEDIATEC Corp.` の部分。`[14c3:0616]` の `14c3` (`:` の前の番号) がベンダーコードに当たり、16進数の値となる。
+
+#### 名前
+
+`MT7922 802.11ax PCI Express Wireless Network Adapter` の部分。
+
+#### デバイスID
+
+`[14c3:0616]` の `0616` の部分（`:` の後の番号）。
+
+#### サブシステム
+
+`Subsystem: Foxconn International, Inc. Device [105b:e0db]` の部分。 デバイスが搭載されているマザーボードやノートPCなどのホストシステムのベンダー名とモデル名を示す。
+
+#### Kernel driver in use / Kernel modules
+
+指定された PCI デバイスを制御しているカーネルドライバの名前を示す。
+
+ - Kernel driver in use: 実際にデバイスにバインドされ、使用中のドライバ名
+ - Kernel modules: そのデバイスをサポートするためにロード可能、利用可能なカーネルモジュールのリスト
+
+#### 情報まとめ
+
+ - Vendor ID: `14c3`
+ - Device ID: `0616`
+ - Subsystem Vendor ID: `105b`
+ - Subsystem Device ID: `e0db`
+ - Kernel driver in use: `mt7921e`
+ - Kernel modules: `mt7921e`
+
+---
