@@ -158,11 +158,11 @@ Linux カーネルで Rust を使用するための仕組みである Rust for L
 
 ### Rust for Linux の外部モジュール用テンプレート
 
-Rust for Linux の外部モジュール用テンプレートは、Git サブモジュールとして管理しています。
+Rust for Linux の外部モジュール用テンプレートは、Kbuild や Makefile の参考資料として参照しています。
 
 - [Rust for Linux — rust-out-of-tree-module](https://github.com/Rust-for-Linux/rust-out-of-tree-module)
 
-サブモジュール内のソースコード、ライセンスファイル、著作権表示は、上流リポジトリのものを維持します。詳細はサブモジュール内の `LICENSE` および各ファイルのライセンス表記を参照してください。
+Rust for Linux 由来の Kbuild、Makefile は、元コードのライセンス条件に従います。
 
 ### Linux カーネルおよび mt76 由来のコード
 
