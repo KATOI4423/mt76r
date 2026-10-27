@@ -180,3 +180,123 @@ $ lspci -nnk
  - Kernel modules: `mt7921e`
 
 ---
+
+### 0.2 PCI resource
+
+```bash
+$ lspci -vv -s 06:00.0
+06:00.0 Network controller: MEDIATEK Corp. MT7922 802.11ax PCI Express Wireless Network Adapter
+        Subsystem: Foxconn International, Inc. Device e0db
+        Control: I/O- Mem+ BusMaster+ SpecCycle- MemWINV- VGASnoop- ParErr- Stepping- SERR- FastB2B- DisINTx+
+        Status: Cap+ 66MHz- UDF- FastB2B- ParErr- DEVSEL=fast >TAbort- <TAbort- <MAbort- >SERR- <PERR- INTx-
+        Latency: 0, Cache Line Size: 64 bytes
+        Interrupt: pin A routed to IRQ 201
+        IOMMU group: 19
+        Region 0: Memory at 4202100000 (64-bit, prefetchable) [size=1M]
+        Region 2: Memory at 85100000 (64-bit, non-prefetchable) [size=32K]
+        Capabilities: <access denied>
+        Kernel driver in use: mt7921e
+        Kernel modules: mt7921e
+```
+
+#### Control
+
+PCI 仕様上の `Command Register (Offset 0x04)` の内容。
+
+```
+Control: I/O- Mem+ BusMaster+ SpecCycle- MemWINV- VGASnoop- ParErr- Stepping- SERR- FastB2B- DisINTx+
+```
+
+| フラグ | 意味 | `+` / `-` の読み方 | 
+| ----- | ---- | ---------------- |
+| I/O | I/O ポート空間への応答の許可 | `+` : 許可、 `-` : 禁止 |
+| Mem | メモリ空間への応答の許可 | `+` : 許可、 `-` : 禁止 |
+| BusMaster | デバイスがバスマスター（DMA でバスを主体的に制御できる）として動作することの許可 | `+` : 許可、 `-` : 禁止 |
+| SpecCycle | 特殊サイクルへの応答の許可 | `+` : 許可、 `-` : 禁止 |
+| MemWINV | メモリ書き込み・無効化トランザクションの許可 | `+` : 許可、 `-` : 禁止 |
+| VGASnoop | VGAパレットのスヌーピングの有効化 | `+` : 有効、 `-` : 無効 |
+| ParErr | パリティエラー応答の有効化 | `+` : 有効、 `-` : 無効 |
+| Stepping | アドレス / データのステッピングの有効化 | `+` : 有効、 `-` : 無効 |
+| SEER | SERR# によるシステムエラー通知の有効化 | `+` : 有効、 `-` : 無効 |
+| FastB2B | Fast Back-to-Back トランザクションの許可 | `+` : 許可、 `-` : 禁止 |
+| DisINTx | INTx（ピン割り込み）の無効化 | `+` : 無効化、 `-` : 無効化していない |
+
+ - DMA: `Direct Memory Access` は、CPUを介さずにデバイスとメモリ感でデータを直接転送する仕組み。これにより、CPUの負荷を軽減しつつ高速かつ大量のデータ転送が可能になる。現代のデバイスドライバは、 `Linux DMA Subsystem` や `DMA Engine Framework` といったカーネル内の抽象化レイヤを通じて、IOMMU やキャッシュコピーレンシを管理しながら DMA 操作を行う。
+ - SERR#: PCI および PCI Express 規格において、システムレベルの致命的なエラーが発生したことを CPU やチップセットに通知するための非マスク可能割り込み（NMI）信号。
+ - FastB2B: PCI バスなどのコンピュータバスにおいて、アイドルサイクル（待機状態）を省略して連続したデータ転送を行う技術仕様。
+ 
+#### Status
+
+PCI 仕様上の `Command Register (Offset 0x06)` の内容。
+
+```
+Status: Cap+ 66MHz- UDF- FastB2B- ParErr- DEVSEL=fast >TAbort- <TAbort- <MAbort- >SERR- <PERR- INTx-
+```
+
+| フラグ | 意味 |
+| ----- | ---- |
+| Cap | Capabilities レジスタが存在するかどうか |
+| 66MHz | 66MHz 動作に対応しているかどうか (従来PCI向け) |
+| UDF | User-Definable Features 機能に対応しているかどうか (従来PCI向け) |
+| FastB2B | Bast Back-to-Back トランザクションに対応いているかどうか (従来PCI向け) |
+| ParErr | パリティエラーが検出されたことを示すステータス |
+| DEVSEL=fast | デバイスがアドレス選択時に応答するタイミングの設定 |
+| >TAbort | デバイスがトランザクションを中止したかどうか |
+| <TAbort | 他のデバイスからトランザクションを中止されたかどうか |
+| <MAbort | 他のデバイスから Master Abort を検出したかどうか |
+| >SERR | システムエラーを通知したことを示すステータス |
+| <PERR | パリティエラーを検出したことを示すステータス |
+| INTx | INTx 割り込みが保留中であることを示す |
+
+#### Latency / Cache Line
+
+```
+Latency: 0, Cache Line Size: 64 bytes
+```
+
+| 項目 | 意味 |
+| --- | --- |
+| Latency | 従来 PCI のLatency Timer。 バス占有に関係する設定値。 |
+| Cache Line Size | 従来　PCI の Cache Line Size フィールド。単位は 32-bit ワード。 |
+
+#### Interrupt
+
+```
+Interrupt: pin A routed to IRQ 201
+```
+
+ - INTx 割り込みピンの情報と、Linux が認識している IRQ 番号
+
+#### IOMMU group
+
+```
+IOMMU group: 19
+```
+
+`IOMMU` は、デバイスが　DMA でアクセスできるメモリ範囲を制御する仕組み。
+`IOMMU group` は、IOMMU による隔離を考える際の単位。
+
+グループの構成は、次のコマンドで確認できる。
+
+```bash
+ls -l /sys/kernel/iommu_groups/<N>/devices/
+```
+
+#### Region (BAR: Base Address Register)
+
+```
+Region 0: Memory at 4202100000 (64-bit, prefetchable) [size=1M]
+Region 2: Memory at 85100000 (64-bit, non-prefetchable) [size=32K]   
+```
+
+| 項目 | Region 0 | Region 2 |
+| --- | --------- | -------- |
+| 物理アドレス | 0x4202100000 | 0x85100000 |
+| 幅 | 64-bit | 64-bit |
+| 属性 | prefetchable | non-prefetchable |
+| サイズ | 1MiB | 32KiB |
+
+ - Region 番号が 0 -> 2 と飛んでいるのは、 64-bit BAR は2つの 32-bit BAR レジスタを消費するため。
+   Region 1 は Region 0 の上位 32 ビットに使用され、独立したリソースではない。
+ - prefetchable : メモリ読み取りを先読みしたり、複数のアクセスをまとめたありしても、デバイスが提供するデータの意味が変わらない性質を表す。通常は大きなバッファやFIFO、フレームバッファで使用される。
+ - non-prefetchable : 制御レジスタのように読み取り自体に副作用があったり、アクセスのたびに値が変化したりなどで、先読みが不適切な領域。
