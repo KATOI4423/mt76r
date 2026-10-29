@@ -367,24 +367,201 @@ parm:           disable_aspm:disable PCI ASPM support (bool)
 
 | 項目 | 意味 |
 | --- | ---- |
-| filename |  |
-| license |  |
-| description |  |
-| author |  |
-| firmware |  |
-| srcversion |  |
-| alias |  |
-| depends |  |
-| intree |  |
-| name |  |
-| retpoline |  |
-| vermagic |  |
-| sig_id |  |
-| signer |  |
-| sig_key |  |
-| sig_hashalgo |  |
-| signature |  |
-| parm |  |
+| filename | モジュールファイルのパス |
+| license | ライセンス |
+| description | ドライバの説明 |
+| author | 作者情報 |
+| firmware | ドライバがカーネルのファームウェアローダーを通じて要求するファイル名 |
+| srcversion | ソース由来の識別情報. ビルド対象ソースなどの変更検知に使われる. |
+| alias | どの PCI デバイスに対応するか. PCI デバイスの識別情報と、ドライバを自動ロードするための対応関係を表している. |
+| depends | 依存するカーネルモジュール |
+| intree | カーネル本体のソースツリー内でビルドされたかどうか |
+| name | カーネルモジュール名 |
+| retpoline | retpoline 対応情報 |
+| vermagic | カーネルとの互換性情報 |
+| sig_id | 署名形式の識別情報 |
+| signer | 署名者として記録された名前 |
+| sig_key | 署名鍵を識別するための情報 |
+| sig_hashalgo | 署名に仕様されたハッシュアルゴリズム |
+| signature | 電子署名のデータ |
+| parm | モジュールパラメータ |
+
+##### filename
+
+> /lib/modules/7.0.0-38-generic/kernel/drivers/net/wireless/mediatek/mt76/mt7921/mt7921e.ko.zst
+
+ - mt7921e.ko : カーネルモジュール本体
+ - .zst : Zstandard 形式で圧縮されている
+
+##### alias
+
+```
+pci:v000014C3d00007920sv*sd*bc*sc*i*
+pci:v000014C3d00000616sv*sd*bc*sc*i*
+pci:v000014C3d00000608sv*sd*bc*sc*i*
+pci:v00000B48d00007922sv*sd*bc*sc*i*
+pci:v000014C3d00007922sv*sd*bc*sc*i*
+pci:v000014C3d00007961sv*sd*bc*sc*i*
+```
+
+| フィールド | 意味 |
+| -------- | ---- |
+| pci: | PCI デバイス向けの alias |
+| v000014C3 | Vendor ID = `0x14C3` |
+| d00007920 | Device ID = `0x7920` |
+| sv* | Subsystem Vendor ID は任意 (ワイルドカード `*` ) |
+| sd* | Subsystem Device ID は任意 (ワイルドカード `*`) |
+| bc* | Base Class は任意 (ワイルドカード `*`) |
+| sc* | Subclass は任意 (ワイルドカード `*`) |
+| i* | Programming Interface は任意 (ワイルドカード `*`) |
+
+PCI デバイスには Vendor ID や Device ID だけでなく、そのデバイスが何をする装置なのかを表す `Class Code` が存在する。Class Code は 24 bit で、3つに分かれている。
+
+```
+PCI Class Code (24bits)
++--- 8 bit ---+  +--- 8 bit ---+  +-------- 8 bit --------+
+| Base Class  |  |  Subclass   |  | Programming Interface |
++-------------+  +-------------+  +-----------------------+
+```
+
+ - Base Class : 基本クラス。例えばネットワークコントローラ、ストレージコントローラ、ディスプレイコントローラなど。
+ - Subclass : 大分類の中での種類。例えばストレージコントローラなら、 SATA や NVMe などの分類。
+ - Programming Interface : その分類の中で、特定のレジスタインターフェースなどを識別するための値。該当する標準的な区別がない場合は、`0x00` などになることもある。
+
+例: USB コントローラ
+
+例えば、 PCI Class Code が `0x0C0330` なら、次のように解釈できる。
+
+| フィールド | 値 | 意味 |
+| -------- | -- | --- |
+| Base Class | 0x0C | Serial Bus Controller |
+| Subclass | 0x03 | USB Controller |
+| Programming Interface | 0x30| xHCI |
+
+##### firmware
+
+```
+mediatek/WIFI_MT7922_patch_mcu_1_1_hdr.bin
+mediatek/WIFI_RAM_CODE_MT7922_1.bin
+mediatek/WIFI_MT7961_patch_mcu_1_2_hdr.bin
+mediatek/WIFI_RAM_CODE_MT7961_1.bin
+mediatek/WIFI_MT7961_patch_mcu_1a_2_hdr.bin
+mediatek/WIFI_RAM_CODE_MT7961_1a.bin
+```
+
+MT7922関連では、特に次の2ファイルが重要。
+
+| ファイル | 大まかな役割 |
+| ------- | ---------- |
+| WIFI_MT7922_patch_mcu_1_1_hdr.bin | MCU 用パッチファームウェア |
+| WIFI_RAM_CORE_MT7922_1.bin | RAM にロードするファームウェアコード |
+
+Linux では、一般に `/lib/firmware/` 以下からファイルが検索される。
+ただし、実ファイルが `.bin.zst` 形式で圧縮されている場合もある。
+
+```
+$ fd MT7922 /lib/firmware/
+/lib/firmware/mediatek/BT_RAM_CODE_MT7922_1_1_hdr.bin.zst
+/lib/firmware/mediatek/WIFI_MT7922_patch_mcu_1_1_hdr.bin.zst
+/lib/firmware/mediatek/WIFI_RAM_CODE_MT7922_1.bin.zst
+```
+
+また、 modinfo にファームウェアが列挙されていても、全てが同時に必要という意味ではない。
+複数チップを扱うドライバが、それぞれのファームウェア名を登録している場合がある。
+
+実際にどのファイルが要求されたかは、カーネルログで確認できる。
+
+```bash
+$ sudo dmesg | rg -i firmware
+...
+[   11.077506] mt7921e 0000:06:00.0: WM Firmware Version: ____000000, Build Time: 20260224103233
+...
+```
+
+##### depends
+
+> mt76-connac-lib,mt7921-common,mt792x-lib,mt76
+
+| モジュール | 大まかな役割 |
+| -------- | ---------- |
+| mt76-connac-lib | MT76 系の CONNAC 世代に関する共通処理 |
+| mt7921-common | MT7921 系ドライバの共通処理 |
+| mt792x-lib | MT792x 系ドライバの共通処理 |
+| mt76 | MT76 ドライバ郡の共通処理 |
+
+##### vermagic
+
+> 7.0.0-38-generic SMP preempt mod_unload modversions
+
+モジュールをどのようなカーネル構成向けにビルドしたかを示す。
+
+| 値 | 意味 |
+| -- | --- |
+| 7.0.0-38-generic | 対象カーネルのリリース文字列 |
+| SMP | 対象型マルチプロセッシング対応 |
+| preempt | プリエンプション関連の構成情報 |
+| mod_unload | モジュールのアンロード機能に関する構成情報 |
+| modversions | モジュールのシンボルバージョン管理に関する構成情報 |
+
+`vermagic` は、モジュールを異なるカーネルに誤ってロードすることを防ぐための互換性チェックに使われる。
+
+##### license
+
+カーネルはモジュールのライセンス文字列を参照し、GPL 専用シンボルの利用可否やカーネルの taint 状態などを判断する。、
+
+##### parm
+
+モジュールの動作を調整するパラメータ
+
+> disable_aspm:disable PCI ASPM support (bool)
+
+ - `disable_aspm` : PCIe の ASPM (Active State Power Management) を無効化するための設定
+ - `bool`: 真偽値
+
+> ASPM は、PCIe のリンクを省電力状態に行こうさせる仕組み。
+
+例えば、ロード時に次のように指定できる
+
+```bash
+sudo modprobe mt7921e disable_aspm=1
+```
+
+この場合、パラメータを `true` に設定する。
+
+すでにモジュールがロードされている場合は、ロード時の引数を変更するために、必要に応じてアンロード・リロードを行う。
+
+現在のパラメータ値は、モジュールがロードされていれば次のように確認できる。
+
+```bash
+$ cat /sys/module/mt7921e/parameters/disable_aspm
+N
+```
+
+
+##### retpoline
+
+Spectre Variant 2 などへの対策に関係する retpoline 対応情報。
+
+ - Spectre Variant 2 : CPU の「投機的実行」を悪用して、通常のプログラムからは直接読めない情報を推測させる攻撃に関係する脆弱性。
+`if (A < B) { ... }` のようなコードがあったとき、CPU は `A < B` の結果が確定する前に、条件が成立すると予測して処理を進めることがある。
+予測が外れれば、、CPU は通常、その処理の結果をアーキテクチャ上の状態に反映しないようにするが、投機的実行に実行された処理の影響がキャッシュなどに残る場合がある。攻撃者がその影響を観測できると、本来アクセスできない情報を推測できる場合がある。
+Variant 2 では、CPU の間接分岐（関数ポインタなど、実行先のアドレスが実行時に決まる分岐）の予測を攻撃者が操作することで、CPUに意図しないコードを実行させることができる可能性がある。
+
+ - retpoline : 攻撃者に操作されてた間接分岐予測を、そのまま実行先の予測に使わせないようにする仕組み。
+
+##### 必要な情報だけを抽出する
+
+`modinfo` は `-F` を使うと、指定した項目だけを表示できる。
+
+```bash
+$ modinfo mt7921e -F firmware
+mediatek/WIFI_MT7922_patch_mcu_1_1_hdr.bin
+mediatek/WIFI_RAM_CODE_MT7922_1.bin
+mediatek/WIFI_MT7961_patch_mcu_1_2_hdr.bin
+mediatek/WIFI_RAM_CODE_MT7961_1.bin
+mediatek/WIFI_MT7961_patch_mcu_1a_2_hdr.bin
+mediatek/WIFI_RAM_CODE_MT7961_1a.bin
+```
 
 #### lsmod
 
