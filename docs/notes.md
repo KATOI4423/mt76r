@@ -444,9 +444,12 @@ $ ls /sys/bus/pci/drivers/mt7921e/
 0000:06:00.0  bind  module  new_id  remove_id  uevent  unbind
 ```
 
- - `0000:06:00.0 -> ../../../../devices/pci0000:00/0000:00:1c.1/0000:06:00.0`
+ - `0000:06:00.0` はシンボリックリンク
 
 ```bash
+$ ls -l /sys/bus/pci/drivers/mt7921e/
+0000:06:00.0 -> ../../../../devices/pci0000:00/0000:00:1c.1/0000:06:00.0
+
 $ ls /sys/devices/pci0000:00/0000:00:1c.1/0000:06:00.0/
 aer                       current_link_speed  ieee80211       modalias     reset             subsystem_vendor
 aer_dev_correctable       current_link_width  iommu           msi_bus      reset_method      uevent
@@ -459,9 +462,12 @@ config                    enable              max_link_speed  remove       subsy
 consistent_dma_mask_bits  firmware_node       max_link_width  rescan       subsystem_device
 ```
 
- - `module -> ../../../../module/mt7921e`
+ - `module` はシンボリックリンク
 
 ```bash
+$ ls -l /sys/bus/pci/drivers/mt7921e/
+module -> ../../../../module/mt7921e
+
 $ ls /sys/module/mt7921e/
 coresize  holders   initstate  parameters  sections    taint
 drivers   initsize  notes      refcnt      srcversion  uevent
