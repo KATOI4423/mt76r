@@ -734,3 +734,139 @@ echo 0000:06:00.0 | sudo tee /sys/bus/pci/drivers/mt7921e/bind
 ```
 
 ---
+
+### 0.5 kernel module
+
+#### module_init
+
+insmod 時に呼ばれるコード。
+
+`impl kernel::Module` トレイトを自作ドライバ構造体に実装し、 `fn init` を定義する。
+
+```Rust
+impl kernel::Module for RustMinimal {
+    fn init(_module: &'static ThisModule) -> Result<Self> {
+        pr_info!("Rust minimal sample (init)\n");
+        ...
+    }
+}
+```
+
+#### module_exit
+
+rmmod 時に呼ばれるコード。
+
+`impl Drop` トレイトを自作ドライバ構造体に実装する。
+
+```Rust
+impl Drop for RustMinimal {
+    fn drop(&mut self) {
+        pr_info!("Rust minimal sample (exit)\n");
+    }
+}
+```
+
+#### module metadata
+
+modinfo で出てくる情報。`module!` マクロで定義する。
+
+```Rust
+module! {
+    type: RustMinimal,
+    name: "rust_minimal",
+    authors: ["Rust for Linux Contributors"],
+    description: "Rust minimal sample",
+    license: "GPL",
+    params: {
+        test_parameter: i64 {
+            default: 1,
+            description: "This parameter has a default of 1",
+        },
+        test_bool_parameter: bool {
+            default: false,
+            description: "This boolean parameter defaults to false",
+        },
+    },
+}
+```
+
+詳細（定義）は [ここ！](https://rust.docs.kernel.org/macros/macro.module.html)。
+
+署名情報や vermagic はない。これらはビルド時に自動で付与される？
+
+#### logging
+
+`pr_info!` や `pr_err!` などを使用。C言語でのカーネルプログラミングで使用する関数名と同じ名前になっている。
+
+```Rust
+pr_emerg!("Emergency message (level 0) without args\n");
+pr_alert!("Alert message (level 1) without args\n");
+pr_crit!("Critical message (level 2) without args\n");
+pr_err!("Error message (level 3) without args\n");
+pr_warn!("Warning message (level 4) without args\n");
+pr_notice!("Notice message (level 5) without args\n");
+pr_info!("Info message (level 6) without args\n");
+```
+
+#### error handling
+
+
+
+#### その他
+
+ - pinned initializer: `<-`
+
+通常の Rust では、構造体を初期化した後でも、その値を別のメモリアドレスに移動できる。
+
+しかし、Linux カーネルの一部のデータ構造では、初期化後にメモリアドレスが変わらないことを保証する必要がある。
+
+例えば、
+
+ - 自分自身へのポインタを保持する構造体
+ - intrusive linked list（後で補足）のノード
+ - 非同期処理で参照されるデータ構造
+
+こうした構造体では、フィールドを初期化する段階から Pin の保証が必要になる。
+
+`<-` は、そのようなフィールドを pinned initializer で初期化することを表す。
+ 
+```Rust
+impl ModuleData {
+    fn init(device_dir: Dir) -> impl PinInit<Self> {
+        pin_init! {
+            Self {
+                device_dir: device_dir,
+                devices <- new_mutex!(KVec::new())
+            }
+        }
+    }
+}
+```
+
+ - `Pin` は、それ自体をムーブしても内部に保持するポインタのアドレスが変わらないことを示す。[`std::pin::Pin`](https://doc.rust-lang.org/std/pin/struct.Pin.html) を参照。
+
+##### intrusive linked list
+
+インクルーシブリンクリスト（侵入型リスト）とは、リストのポインタ（リンク）をデータ構造そのものの中に埋め込み、追加のメモリ割当なしにリストを構造するデータ構造。
+
+通常のリンクリストが「ノードがデータポインタを持つ」のに対し、intrusive linked list ではデータ構造自体が `next` や `prev` などのポインタメンバを持つため、リスト構造がデータに「侵入（intrude）」しているように見える。
+
+```C
+// 通常のリスト: malloc(Node) と malloc(data)が別々に必要
+struct Node {
+    Node* next;
+    Node* prev;
+    int* data; // <- データは別割り当て
+};
+
+// intrusive linked list: malloc(Process)だけでOK
+struct Process {
+    // リストポインタがここにある。
+    // 次のProcess構造体へアクセスするには list->head->next などする。
+    struct list_head list;
+    pid_t pid;
+    // ...
+}
+```
+
+----
