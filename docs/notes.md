@@ -650,3 +650,87 @@ coresize  holders   initstate  parameters  sections    taint
 drivers   initsize  notes      refcnt      srcversion  uevent
 ```
 ---
+
+### 0.4 最初の原則
+
+既存 `mt7921e` が MT7922 を掴んでいるので、自作モジュールを insmod する際に MT7922 が mt7921e に掴まれていない状態にしないと、自作モジュールから MT7922 を操作できない。
+
+これを解決するため、 `driver_override` という仕組みがある。
+
+#### PCI ドライバ管理の流れ
+
+Linux の PCI ドライバでは、基本的に次のような流れになる。
+
+1. PCI デバイスが検出される
+2. PCI ID が一致するドライバが検索される
+3. ドライバの `probe()` が呼ばれる
+4. `probe()` が成功すると、そのドライバがデバイスを管理する
+
+既に `mt7921e` の `probe()` が成功している場合、自作ドライバをロードしても自動的に切り替わることはない。
+そこで、既存ドライバからデバイスを解放し、自作ドライバに明示的に割り当てる。
+
+#### driver_override の方法
+
+`/sys/bus/pci/devices/$BDF` に `driver_override` がある。
+
+```bash
+$ ls -la  /sys/bus/pci/devices/0000:06:00.0/driver_override
+.rw-r--r-- 4.1k root 29 10月 21:21 /sys/bus/pci/devices/0000:06:00.0/driver_override
+$ cat /sys/bus/pci/devices/0000:06:00.0/driver_override
+(null)
+```
+
+ここにオーバーライドさせたいモジュール名を記入することで、PCI ID による通常のマッチングを上書きできる。
+
+```bash
+echo mt76r | sudo tee /sys/bus/pci/devices/0000:06:00.0/driver_override
+```
+
+ - 指定した名前のドライバだけをバインド対象にする
+ - 現在のドライバを自動的に解除するわけではない
+ - 指定したドライバを自動的にロードするわけではない
+
+すなわち、 `driver_override` に自作ドライバを登録しただけで、デバイスを使用できるというわけではない。
+
+#### 自作モジュールからデバイスを使用する
+
+以下の手順で行う。
+
+1. デバイスの解放
+
+> echo 0000:06:00.0 | sudo tee /sys/bus/pci/drivers/mt7921e/unbind
+
+これで MT7922 が mt7921e から解放される
+
+2. 自作モジュールのロード
+
+> sudo insmod mt76r
+
+3. デバイスをドライバにバインド
+
+> echo 0000:06:00.0 | sudo tee /sys/bus/pci/drivers/mt76r/bind
+
+これで自作ドライバの `probe()` が呼ばれる。
+
+4. バインド状態の確認
+
+> readlink /sys/bus/pci/devices/0000:06:00.0/driver
+
+`mt7691e` の場合のように、`mt76r` への相対パスが表示されれば、バインドに成功している。
+
+#### driver_override の解除方法
+
+自作ドライバからデバイスを解放して、元のドライバに戻す場合は次のようにする。
+
+```bash
+# 自作ドライバから解放
+echo 0000:06:00.0 | sudo tee /sys/bus/pci/drivers/mt76r/unbind
+
+# override を解除
+echo "" | sudo tee /sys/bus/pci/devices/0000:06:00.0/driver_override
+
+# 元のドライバに再バインド
+echo 0000:06:00.0 | sudo tee /sys/bus/pci/drivers/mt7921e/bind
+```
+
+---
