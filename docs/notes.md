@@ -852,7 +852,7 @@ impl ModuleData {
 }
 ```
 
- - `Pin` は、それ自体をムーブしても内部に保持するポインタのアドレスが変わらないことを示す。[`std::pin::Pin`](https://doc.rust-lang.org/std/pin/struct.Pin.html) を参照。
+ - `Pin<P>` は、ポインタ `P` が指す値について、 PIN の保証が有効な間、その値がメモリ上で移動しないことを保証する。ただし、すべての肩に対して無条件に移動を禁止するわけではなく、主に `!Unpin` の肩に対して意味を持つ。[`std::pin::Pin`](https://doc.rust-lang.org/std/pin/struct.Pin.html) を参照。
 
 ##### intrusive linked list
 
