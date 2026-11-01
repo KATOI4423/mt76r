@@ -792,7 +792,9 @@ module! {
 
 詳細（定義）は [ここ！](https://rust.docs.kernel.org/macros/macro.module.html)。
 
-署名情報や vermagic はない。これらはビルド時に自動で付与される？
+署名情報や vermagic はない。vermagic はビルド時に自動で付与され、署名情報は署名処理が行われた場合に付与される。
+また、Rust のモジュールを Linux Kernel のモジュールシステムに接続するためのコードも生成する。
+そのため、 `module_init` や `module_exit` に相当する仕組みを、C言語のように明示的に登録する必要がない。
 
 #### logging
 
@@ -810,7 +812,14 @@ pr_info!("Info message (level 6) without args\n");
 
 #### error handling
 
+Rust for Linux では、基本的に通常の Rust と同じく `Result` / `?` を使用する。
+ただし、エラーを Linux Kernel のエラーコード (`-ENOMEM`、 `-EINVAL` など) に対応させる必要がある。
 
+そのため、Rust for Linux では `Result` のエラー型がカーネルの `Error` に固定されている。
+
+```Rust
+type Result<T> = core::result::Result<T, Error>;
+```
 
 #### その他
 
