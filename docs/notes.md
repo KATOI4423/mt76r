@@ -879,3 +879,48 @@ struct Process {
 ```
 
 ----
+
+### 01-environment.md まとめ
+
+#### PCI device と PCI driver の違い
+
+ - PCI device は PCI バスに接続されたハードウェア
+ - PCI driver は PCI device を初期化し、操作するためのソフトウェア
+
+#### probe がいつ呼ばれるか
+
+ - PCI device と PCI driver が登録され、PCI device ID などの条件が一致してデバイスとドライバが bind されたときに probe() が実行される
+
+#### remove がなぜ必要か
+
+ - PCI driver の unload や unbind、PCI device を取り除く際に、 probe() で確保したリソースを解放するために必要
+ - MMIO のマッピング、DMA バッファ、IRQ の登録、 Workqueue や Timer、Firmware関連のリソースなども解放される
+
+#### module と built-in の違い
+
+ - module 独立した kernel module (.ko) としてビルドされ、modprobe や insmod で使用可能になる
+ - built-in は Linux Kernel のビルド時に kernel image に組み込まれる。個別に unload できず、変更には kernel の更新・再ビルドが必要。
+
+#### kernel virtual address と physical address の違い
+
+ - physical address は CPU 物理アドレス空間上のアドレス
+   - ROM の物理アドレス
+   - RAM の物理アドレス
+   - PCI device の MMIO 領域に割り当てられたアドレス
+   - etc...
+ - kernel virtual address は CPU がカーネル空間で使用する仮想アドレス
+   - MMU (Memory Management Unit) を通じて、対応する物理アドレスに変換される
+   - RAM へのアクセス : 仮想アドレス --[MMU]--> RAM や ROM の物理アドレス
+   - PCIe の MMIO : 仮想アドレス --[MMU]--> CPU の物理アドレス空間上の MMIO アドレス --[PCIe ホストブリッジ]--> PCI device 内部のレジスタ
+ - DMA では、CPU を通じてではなくデバイス自身がメモリにデータを書き込むため、デバイス側が使用するアドレス(DMA address)が必要になる
+   - DMA address --[IOMMU]--> RAM の物理アドレス
+
+#### `unsafe` がなぜ必要になり得るか
+
+ - Rust コンパイラが静的に保証できない操作を、プログラマが安全性を確認したうえで実行するために必要
+   - 生ポインタの dereference : 有効なアドレスか、適切なアラインメントかなどをコンパイラが保証できない
+   - FFI : C言語側の API の契約やメモリ管理を Rust コンパイラだけでは検証できない
+   - MMIO : 通常のメモリアクセスとは異なるハードウェアアクセスが必要
+   - 生ポインタの生成・操作 : ポインタの有効性や参照の安全性を適切に管理する必要がある
+
+---
