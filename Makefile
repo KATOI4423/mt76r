@@ -8,6 +8,7 @@ OUTPUT_DIR ?= $(CURDIR)/target
 RUSTC_FULL_VER := $(shell sed -n 's/^CONFIG_RUSTC_VERSION_TEXT=rustc \([0-9.]*\).*/\1/p' $(KDIR)/include/config/auto.conf)
 RUSTC_VER := $(shell sed -n 's/^CONFIG_RUSTC_VERSION_TEXT=rustc \([0-9]*\.[0-9]*\).*/\1/p' $(KDIR)/include/config/auto.conf)
 RUSTC ?= /usr/bin/rustc-$(RUSTC_VER)
+PROC_MACRO_SRC ?= /usr/lib/rust-$(RUSTC_VER)/libexec/rust-analyzer-proc-macro-srv
 
 default: check
 	$(MAKE) -C $(KDIR) M=$(CURDIR) MO=$(OUTPUT_DIR) RUSTC=$(RUSTC)
@@ -43,9 +44,12 @@ rust-project.json: check check-ksrc
 
 .PHONY: configure
 configure: check rust-project.json
-	@rustup toolchain install $(RUSTC_FULL_VER) --profile minimal -c rust-analyzer
-	@python3 scripts/update_settings.py \
-	"$$(dirname "$$(dirname "$$(rustup which --toolchain $(RUSTC_FULL_VER) rustc)")")/libexec/rust-analyzer-proc-macro-srv"
+	@test -x $(PROC_MACRO_SRC) || { \
+		echo "error: $(PROC_MACRO_SRC) not found." ; \
+		echo "  sudo apt install rustc-$(RUSTC_VER)"; \
+		exit 1; \
+	}
+	@python3 scripts/update_settings.py "$(PROC_MACRO_SRC)"
 
 clean:
 	$(MAKE) -C $(KDIR) M=$(CURDIR) MO=$(OUTPUT_DIR) clean
