@@ -37,6 +37,9 @@ rust-project.json: check check-ksrc
 		'.crates |= map(.root_module |= if startswith($$hdr) then $$src + ltrimstr($$hdr) else . end)' \
 		rust-project.json > rust-project.json.tmp
 	mv rust-project.json.tmp rust-project.json
+	jq --arg root "$(CURDIR)/src/lib.rs" -f scripts/add_crate.jq \
+		rust-project.json > rust-project.json.tmp
+	mv rust-project.json.tmp rust-project.json
 
 .PHONY: configure
 configure: check rust-project.json
