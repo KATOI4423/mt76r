@@ -2,36 +2,12 @@
 
 //! Rust out-of-tree sample
 
-use kernel::prelude::*;
+pub(crate) mod mt7921;
 
-module! {
-    type: RustOutOfTree,
-    name: "rust_out_of_tree",
-    authors: ["Rust for Linux Contributors"],
-    description: "Rust out-of-tree sample",
-    license: "GPL",
-}
-
-struct RustOutOfTree {
-    numbers: KVec<i32>,
-}
-
-impl kernel::Module for RustOutOfTree {
-    fn init(_module: &'static ThisModule) -> Result<Self> {
-        pr_info!("Rust out-of-tree sample (init)\n");
-
-        let mut numbers = KVec::new();
-        numbers.push(72, GFP_KERNEL)?;
-        numbers.push(108, GFP_KERNEL)?;
-        numbers.push(200, GFP_KERNEL)?;
-
-        Ok(RustOutOfTree { numbers })
-    }
-}
-
-impl Drop for RustOutOfTree {
-    fn drop(&mut self) {
-        pr_info!("My numbers are {:?}\n", self.numbers);
-        pr_info!("Rust out-of-tree sample (exit)\n");
-    }
+kernel::module_pci_driver! {
+	type: mt7921::pci::Mt7921,
+	name: "mt76r",
+	authors: ["KATOI <katoi4423@gmail.com>"],
+	description: "MediaTek MT7921E (PCIe) wireless driver by Rust",
+	license: "Dual BSD/GPL",
 }
