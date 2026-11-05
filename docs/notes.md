@@ -924,3 +924,41 @@ struct Process {
    - 生ポインタの生成・操作 : ポインタの有効性や参照の安全性を適切に管理する必要がある
 
 ---
+
+## Phase 2 --- Bar / MMIO
+
+### pcim_enable_device
+
+linux/drivers/pci/devres.c にて実装
+
+driver の detach 時に自動でデバイスを無効化するようにする設定を行う
+
+``` C
+ret = pcim_enable_device(pdev);
+if (ret)
+	return ret;
+```
+
+↓
+
+```Rust
+pdev.enable_device_mem()?;
+```
+
+### pci_set_master
+
+linux/drivers/pci/pci.c にて実装
+
+device の バスマスタリング を有効にし、pcibios_set_master() を呼び出して、必要なアーキテクチャ固有の設定を行う
+
+``` C
+pci_set_master(pdev);
+```
+
+↓
+
+``` Rust
+pdev.set_master();
+```
+
+---

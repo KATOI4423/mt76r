@@ -63,6 +63,9 @@ impl pci::Driver for Mt7921 {
 			pr_info!("  device id: {}\n", &pdev.device_id());
 			pr_info!("  id_info: {}\n", &id_info.0);
 
+			pdev.enable_device_mem()?;
+			pdev.set_master();
+
 			Ok(try_pin_init!(Self {
 				bar <- pdev.iomap_region_sized::<{ Regs::END }>(0, c"mt76r"),
 				index: *id_info,
