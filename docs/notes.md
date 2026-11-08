@@ -961,4 +961,657 @@ pci_set_master(pdev);
 pdev.set_master();
 ```
 
+### pcim_iomap_region
+
+linux/drivers/pci/devres.c にて実装
+
+PCI BAR を要求し、 iomap を実行する
+
+ドライバーの切り離し時に、マッピングと領域は自動的に解放される。必要に応じて、pcim_iounmap_region() を使用して手動で解放できる。
+
+``` C
+void __iomem *regs = pcim_iomap_region(pdev, 0, pci_name(pdev));
+if (IS_ERR(regs)) {
+	ret = PTR_ERR(regs);
+	goto err_free_dev;
+}
+```
+
+ ↓
+
+``` Rust
+Ok(try_pin_init!(Self {
+	bar <- pdev.iomap_region_sized::<{ Regs::END }>(0, c"rust_driver_pci")
+	...
+}))
+```
+
+#### C での定義
+
+``` C
+// linux/deivers/pci/devres.c
+/**
+ * @pdev: IO リソースをマッピングするための PCI デバイス
+ * @bar: マッピングする BAR の番号
+ * @name: リソースをリクエストするドライバーの名前
+ */
+void __iomem *pcim_iomap_region(struct pci_dev *pdev, int bar, const char *name);
+```
+
+``` mermaid
+flowchart TB
+	subgraph pcim_iomap_region["void __iomem *pcim_iomap_region(struct pci_dev *pdev, int bar, const char *name)"]
+		Start([Start])
+
+		subgraph pci_bar_index_is_valid["static inline bool pci_bar_index_is_valid(int bar)"]
+			check_bar{"0 <= bar < PCI_NUM_RESOURCES ?"}
+		end
+
+		direction TB
+		Start --> check_bar
+
+		check_bar -->|Yes| alloc_devres["struct pcim_addr_devres *res = pcim_addr_devres_alloc(pdev);"]
+		check_bar -->|No| invalid_bar["return IOMEM_ERR_PTR(-EINVAL);"]
+
+		alloc_devres --> check_devres{"Is res NOT NULL"}
+
+		check_devres -->|Yes| set_devres_type["res->type = REGION_MAPPING"]
+		check_devres -->|No| invalid_devres["return IOMEM_ERR_PTR(-ENOMEM);"]
+
+		set_devres_type --> set_devres_bar["res->bar = bar"]
+
+		set_devres_bar --> request_region["ret = pci_request_region(pdev, bar ,name);"]
+
+		request_region --> check_region{"Is ret 0 ?"}
+		check_region --> |Yes| set_devres_baseaddr["res->baseaddr = pci_iomap(pdev, bar, 0);"]
+		check_region --> |No| err_region["pcim_addr_devres_free(res);"]
+
+		set_devres_baseaddr --> check_baseaddr{"Is NOT res->baseaddr NULL ?"}
+
+		check_baseaddr --> |Yes| devres_add("devres_add(&pdev->dev, res);")
+		devres_add --> finish["return res->baseaddr;"]
+
+		check_baseaddr --> |No| invalid_baseaddr["ret = -EINVAL"]
+
+		invalid_baseaddr --> err_iomap["pci_release_region(pdev, bar)"]
+		err_iomap --> err_region
+
+		err_region --> err["return IOMEM_ERR_PTR(ret)"]
+	end
+```
+
+#### Rust での定義
+
+``` Rust
+// linux/rust/kernel/pci/io.rs
+impl Device<device::Bound> {
+	/// そのPCI BAR領域に対してリージョン要求を実行した後、PCI BAR全体をマッピングする
+	/// オフセット（要求された型サイズを加えた値）が SIZE 未満の場合、I/O 操作のバウンドチェックをコンパイル時に実行できる
+	pub fn iomap_region_sized<'a, const SIZE: usize>(
+		&'a self, bar: u32, name: &'a CStr,
+	) -> impl PinInit< Devres<Bar<SIZE>>, Error > + 'a {
+		Devres::new(self.as_ref(), Bar::<SIZE>::new(self, bar, name))
+	}
+
+	/// そのPCI BAR領域に対してリージョン要求を実行した後、PCI BAR全体をマッピングする
+	pub fn iomap_region<'a>(
+		&'a self, bar: u32, name: &'a CStr,
+	) -> impl PinInit< Devres<Bar>, Error > + 'a {
+		self.iomap_region_sized::<0>(bar, name)
+	}
+}
+
+// linux/rust/kernel/devres.rs
+impl<T: Send> Devres<T> {
+	///与えられた `data` に基づいて、新しい `Devres` のインスタンスを作成する
+	///
+	/// 返り値の `Devres` インスタンスの `data` にカプセル化された `data` は、
+	/// デバイスが取り外されると `Revocable` となる（取り消される）
+	pub fn new<E>(dev: &Device<Bound>, data: impl PinInit<T, E>) -> Result<Self>
+	where
+		Error: From<E>,
+	{
+		let callback = Self::devres_callback;
+		let data = Arc::pin_init(Revocable::new(data), GFP_KERNEL)?;
+		let devres_data = data.clone();
+
+		// SAFETY:
+		// - `dev.as_raw()` は有効なバインド済みデバイスへのポインタ
+		// - `data` は `Self` の存在期間中、有効であることが保証されている
+		// - `devm_add_action` は `dev` のライフライム全体を通じて
+		//   `callback` を呼び出さないことが保証されている
+		to_result(unsafe {
+			// devm_add_action は C言語側で定義されていて、bindgen が　Rust コードを自動生成している
+			// callback と data を紐づけた devres を dev に追加する
+			bindings::devm_add_action(
+				dev.as_raw(),
+				Some(callback),
+				Arc::as_ptr(&data).cast_mut().cast(),
+			)
+		})?;
+
+		// `devm_add_action()` は成功し、参照カウントを消費済みである
+		core::mem::forget(devres_data);
+
+		Ok(Self {
+			dev: dev.into(),
+			callback,
+			data,
+		})
+	}
+}
+
+// lib/modules/$(uname -r)/build/rust/bindings/bindings_helpers_generated.rs
+extern "C" {
+	#[link_name="rust_helper_devm_add_action"]
+	pub fn devm_add_action(
+		dev: *mut device,
+		action: ::core::option::Option<unsafe extern "C" fn(arg1: *mut ffi::c_void)>,
+		data: *mut ffi::c_void,
+	) -> ffi::c_int;
+}
+
+// linux/rust/kernel/pci/io.rs
+/// I/O 操作を実行するための PCI BAR。
+///
+/// I/O バックエンドは、デバイスがリトルエンディアンであることを前提としており、
+/// リトルエンディアンから CPU のエンディアン形式へ自動的に変換を行う
+///
+/// # 不変条件
+/// `Bar` は常に、I/O メモリマッピングされた PCI BAR の先頭への有効なポインタと
+/// そのサイズを保持する `IoRaw` インスタンスを保持している
+pub struct Bar<const SIZE: usize = 0> {
+	pdev: ARef<Device>,
+	io: MmioRaw<SIZE>,
+	num: i32,
+}
+
+impl<const SIZE: usize> Bar<SIZE> {
+	pub(super) fn new(pdev: &Device, num: u32, name: &CStr) -> Result<Self> {
+		let len = pdev.resource_len(num)?;
+		if len == 0 {
+			return Err(ENOMEM);
+		}
+
+		// 全ての C バインディングで i32 が使用されているので、 i32 に変換する
+		let num = i32::try_from(num)?;
+
+		// SAFETY:
+		// `pdev` は `Device` の不変条件によって有効であることが保証されている
+		// `num` は上記の `Device::resource_len` の呼び出しによって有効性が保証されている
+		// `name` は常に有効である
+		let ret = unsafe {
+			bindings::pci_request_region(pdev.as_raw(), num, name.as_char_ptr())
+		};
+		if ret != 0 {
+			return Err(EBUSY);
+		}
+
+		// SAFETY:
+		// `pdev` は `Device` の不変条件によって有効であることが保証されている
+		// `num` は上記の `Device::resource_len` の呼び出しによって有効性が保証されている
+		// `name` は常に有効である
+		let ioptr: usize = unsafe { bindings::pci_iomap(pdev.as_raw(), num, 0) } as usize;
+		if ioptr == 0 {
+			// SAFETY:
+			// `pdev` は `Device` の不変条件によって有効であることが保証されている
+			// `num` は上記の `Device::resource_len` の呼び出しによって有効性が保証されている
+			unsafe { bindings::pci_release_region(pdev.as_raw(), num) };
+			return Err(ENOMEM);
+		}
+
+		let io = match MmioRaw::new(ioptr, len as usize) {
+			Ok(io) => io,
+			Err(err) => {
+				// SAFETY:
+				// `pdev` は `Device` の不変条件によって有効であることが保証されている
+				// `ioptr` は、有効な I/O マッピングされたメモリ領域の先頭であることが保証されている
+				// `num` は上記の `Device::resource_len` の呼び出しによって有効性が保証されている
+				unsafe { Self::do_release(pdev, ioptr, num) };
+				return Err(err);
+			}
+		};
+
+		Ok(Bar {
+			pdev: pdev.into(),
+			io,
+			num,
+		})
+	}
+}
+
+// linux/rust/kernel/pci.rs
+impl Device {
+	pub fn resource_len(&self, bar: u32) -> Result<bindings::resource_size_t> {
+		if !Bar::index_is_valid(bar) {
+			return Err(EINVAL);
+		}
+
+		// SAFETY:
+		// - `bar` は上記の `Bar::index_is_valid` の呼び出しによって、有効な BAR number であることが保証されている
+		// - 型不変式 `self.as_raw` は常に `struct pci_dev` への有効なポインタとなる
+		Ok(unsafe { bindings::pci_resource_len(self.as_raw(), bar.try_into()?) })
+	}
+}
+
+// lib/modules/$(uname -r)/build/rust/bindings/bindings_helpers_generated.rs
+extern "C" {
+	#[link_name="rust_helper_pci_resource_len"]
+	pub fn pci_resource_len(pdev: *mut pci_dev, bar: ffi::c_int) -> resource_size_t;
+}
+
+// linux/rust/kernel/io.rs
+/// MMIO領域の生の表現。
+/// この構造体のインスタンスが存在するだけでは、表現されているMMIO領域が実際に存在することや、
+/// 適切にマッピングされていることについては、何ら保証されない
+/// その代わりに、バス固有のMMIO実装が、この生の表現を、
+/// 実際のメモリアクセッサを提供する`Mmio`インスタンスに変換する必要がある
+/// `Mmio`構造体への変換が行われて初めて、何らかの保証が与えられる
+pub struct MmioRaw<const SIZE: usize = 0> {
+    addr: usize,
+    maxsize: usize,
+}
+
+impl<const SIZE: usize> MmioRaw<SIZE> {
+    pub fn new(addr: usize, maxsize: usize) -> Result<Self> {
+        if maxsize < SIZE {
+            return Err(EINVAL);
+        }
+
+        Ok(Self { addr, maxsize })
+    }
+}
+```
+
+#### Rust <-> C のヘルパー
+``` C
+// linux/rust/helpers/device.c
+__rust_helper int rust_helper_devm_add_action(struct device *dev,
+                                              void (*action)(void *),
+                                              void *data)
+{
+	return devm_add_action(dev, action, data);
+}
+
+// linux/include/linux/device/devres.h
+#define devm_add_action(dev, action, data) \
+	__devm_add_action(dev, action, data, #action)
+
+// linux/drivers/base/devres.c
+int __devm_add_action(struct device *dev, void (*action)(void *), void *data, const char *name)
+{
+struct action_devres *devres;
+
+	devres = __devres_alloc_node(devm_action_release, sizeof(struct action_devres),
+	                             GFP_KERNEL, NUMA_NO_NODE, name);
+	if (!devres)
+		return -ENOMEM;
+
+	devres->data = data;
+	devres->action = action;
+
+	devres_add(dev, devres);
+	return 0;
+}
+
+
+// linux/rust/helpers/pci.c
+__rust_helper resource_size_t rust_helper_pci_resource_len(struct pci_dev *pdev,
+                                                           int bar)
+{
+	return pci_resource_len(pdev, bar);
+}
+
+// linux/include/linux/pci.h
+#define pci_resource_n(dev, bar)	(&(dev)->resource[(bar)])
+#define pci_resource_start(dev, bar)	(pci_resource_n(dev, bar)->start)
+#define pci_resource_end(dev, bar)	(pci_resource_n(dev, bar)->end)
+#define pci_resource_flags(dev, bar)	(pci_resource_n(dev, bar)->flags)
+#define pci_resource_len(dev,bar)					\
+	(pci_resource_end((dev), (bar)) ? 				\
+	 resource_size(pci_resource_n((dev), (bar))) : 0)
+
+// linux/include/linux/ioport.h
+static inline resource_size_t resource_size(const struct resource *res)
+{
+	return res->end - res->start + 1;
+}
+
+// linux/include/linux/ioport.h
+/*
+ * Resources are tree-like, allowing
+ * nesting etc..
+ */
+struct resource {
+	resource_size_t start;
+	resource_size_t end;
+	const char *name;
+	unsigned long flags;
+	unsigned long desc;
+	struct resource *parent, *sibling, *child;
+};
+```
+
+つまり、`pdev.iomap_region_sized<SIZE>` に指定する `SIZE` は、 アクセスするレジスタ範囲の最小保証値で、BAR サイズ以下であればよい （ MmioRaw の `if maxsize < SIZE { return Err(EINVAL); }` の部分 ）
+
+mt7922 の BAR 0 サイズが 1MiB なので、 `pdev` のリソースのサイズとして 1MiB を指定する
+
+### pci_request_region
+
+``` C
+int pci_request_region(struct pci_dev *pdev, int bar, const char *name)
+```
+
+ - `pdev[bar]->flags` に `IORESOURCE_IO` が含まれていれば、 `ioport_resource` に確保した `res` を挿入する
+ - `pdev[bar]->flags` に `IORESOURCE_IO` が含まれておらず、 `IORESOURCE_MEM` が含まれていれば、 `iomem_resource` に確保した `res` を挿入する
+ - 挿入箇所は `__request_region_locked` の `conflict` 変数に関連する処理にて決定される
+	1. アドレスが範囲内になるまで、`Reserved` -> `System RAM` -> ... -> `PCI Bus 0000:06` と sibling をスキップしていく
+	2. 空いている `child` が見つかるまで、 `PCI Bus 0000:06` -> `0000:06:00.0` -> `mt76r (今回追加した、空いていた child の位置)` と child 方向へ降りていく
+
+``` mermaid
+flowchart TB
+subgraph __request_region_locked(res, parent, start, n, name, flags)
+	direction TB
+	Init["初期化: res->name = name; res->start = start; res->end = start + n - 1;"]
+
+	ResSetting["res->flags, res->descの設定"]
+
+	Init --> ResSetting
+
+	ResSetting --> RequestResource["リソースの取得: conflict = __request_resource(parent, res);"]
+
+	RequestResource --> CheckResource{"conflictなし?"}
+	CheckResource -->|Yes| Finish["return 0;"]
+	CheckResource -->|No| CheckUnaddressableDevice["Unaddressable device?"]
+
+	CheckUnaddressableDevice --> |Yes| WarnUnaddressableDevice["warning"]
+	WarnUnaddressableDevice --> CheckConflict
+	CheckUnaddressableDevice --> |No| CheckConflict{"conflict != parent && conflict is NOT BUSY ?"}
+
+	CheckConflict -->|No| ConflictFlagCheck{"conflictのフラグチェック (今回は flags=0 なので常に偽): conflict->flags & flags & IORESOURCE_MUXED ?"}
+
+	CheckConflict -->|Yes| ParentSet["parent = conflict;"]
+	ParentSet --> ResSetting
+
+	ConflictFlagCheck -->|No| BUSY["return -EBUSY"]
+	ConflictFlagCheck -->|Yes| Muxed["muxedの処理やscheduleなど"]
+	Muxed --> ResSetting
+end
+
+subgraph __request_resource(root, new)
+	direction TB
+
+	CheckNew{"new.start <= new.end ?"}
+	CheckNew -->|No| Root["return root;"]
+	CheckNew -->|Yes| CheckStart{"root.start <= new.start ?"}
+
+	CheckStart -->|No| Root
+	CheckStart -->|Yes| CheckEnd{"new.end <= root.end?"}
+
+	CheckEnd -->|No| Root
+	CheckEnd -->|Yes| SetP["p = &root->child"]
+
+	SetP --> SetTmp["tmp = *p"]
+
+	SetTmp --> CheckTmp{"tmp is NULL ?"}
+
+	CheckTmp -->|Yes| SetNew["new->sibling = tmp; *p = new; new->parent = root;"]
+	SetNew --> NULL["return NULL;"]
+	CheckTmp -->|No| CheckTmpStart{"new end < tmp->start ?"}
+	CheckTmpStart -->|Yes| SetNew
+	CheckTmpStart -->|No| SetNext["p = &tmp->sibling;"]
+
+	SetNext --> CheckTmpEnd{"tmp->end < new.start ?"}
+	CheckTmpEnd -->|Yes| SetTmp
+	CheckTmpEnd -->|No| Tmp["return tmp;"]
+end
+```
+
+``` bash
+$ sudo cat /proc/iomem
+00000000-00000fff : Reserved
+00001000-0009dfff : System RAM
+0009e000-0009efff : Reserved
+0009f000-0009ffff : System RAM
+...
+4000000000-7fffffffff : PCI Bus 0000:00
+  4000000000-4201ffffff : PCI Bus 0000:01
+    4000000000-41ffffffff : 0000:01:00.0
+    4200000000-4201ffffff : 0000:01:00.0
+  ...
+  4202002000-4202002fff : 0000:00:15.2
+    4202002000-42020021ff : lpss_dev
+      4202002000-42020021ff : i2c_designware.2 lpss_dev
+    4202002200-42020022ff : lpss_priv
+    4202002800-4202002fff : idma64.2
+      4202002800-4202002fff : idma64.2 idma64.2
+  4202100000-42021fffff : PCI Bus 0000:06
+    4202100000-42021fffff : 0000:06:00.0
+      4202100000-42021fffff : mt76r
+  4202200000-42023fffff : PCI Bus 0000:03
+...
+```
+
+``` C
+// linux/drivers/pci/pci.c
+/**
+ * pci_request_region - PCI I/O とメモリーリソースを確保する
+ * @pdev: リソースを確保するPCIデバイス
+ * @bar: 確保する BAR
+ * @name: リソースを要求するデバイスの名前
+ *
+ * Returns: 0 on success, negative error code on failure.
+ *
+ * PCI デバイス `@pdev` の BAR `@bar` に関連付けられた PCI 領域を
+ * 所有者 `@name` によって予約済みとしてマークする
+ * この呼び出しが正常に完了にしない限り、PCI 領域内のいかなるアドレスにも
+ * アクセスしてはいけない
+ *
+ * Returns 0 on success, or %EBUSY on error.
+ * エラーが発生した場合には警告メッセージも出力される
+ */
+int pci_request_region(struct pci_dev *pdev, int bar, const char *name)
+{
+	return __pci_request_region(pdev, bar, name, 0);
+}
+
+/**
+ * __pci_request_region - PCI I/O とメモリーリソースを確保する
+ * @pdev: リソースを確保するPCIデバイス
+ * @bar: 確保する BAR
+ * @name: リソースを要求するデバイスの名前
+ * @exclusive: その領域へのアクセスが排他的であるかどうか
+ *
+ * Returns: 0 on success, negative error code on failure.
+ *
+ * PCI デバイス `@pdev` の BAR `@bar` に関連付けられた PCI 領域を
+ * 所有者 `@name` によって予約済みとしてマークする
+ * この呼び出しが正常に完了にしない限り、PCI 領域内のいかなるアドレスにも
+ * アクセスしてはいけない
+ *
+ * @exclusive が設定されている場合、その領域にはマークが付けられ、
+ * ユーザー空間から /dev/mem や sysfs の MMIO アクセスを介して
+ * リソースをマッピングすることが明示的に禁止される
+ *
+ * Returns 0 on success, or %EBUSY on error.
+ * エラーが発生した場合には警告メッセージも出力される
+ */
+static int __pci_request_region(struct pci_dev *pdev, int bar,
+				const char *name, int exclusive)
+{
+	if (!pci_bar_index_is_valid(bar))
+		return -EINVAL;
+
+	if (pci_resource_len(pdev, bar) == 0)
+		return 0;
+
+	if (pci_resource_flags(pdev, bar) & IORESOURCE_IO) {
+		if (!request_region(pci_resource_start(pdev, bar),
+			    pci_resource_len(pdev, bar), name))
+			goto err_out;
+	} else if (pci_resource_flags(pdev, bar) & IORESOURCE_MEM) {
+		if (!__request_mem_region(pci_resource_start(pdev, bar),
+					pci_resource_len(pdev, bar), name,
+					exclusive))
+			goto err_out;
+	}
+
+	return 0;
+
+err_out:
+	pci_warn(pdev, "BAR %d: can't reserve %pR\n", bar,
+		 &pdev->resource[bar]);
+	return -EBUSY;
+}
+
+// linux/include/linux.ioport.h
+struct resource {
+	resource_size_t start;
+	resource_size_t end;
+	const char *name;
+	unsigned long flags;
+	unsigned long desc;
+	struct resource *parent, *sibling, *child;
+};
+
+/* PC/ISA/whatever - the normal PC address spaces: IO and memory */
+extern struct resource ioport_resource;
+extern struct resource iomem_resource;
+#define request_region(start,n,name) \
+	__request_region(&ioport_resource, (start), (n), (name), 0)
+#define __request_mem_region(start,n,name, excl) \
+	__request_region(&iomem_resource, (start), (n), (name), excl)
+
+
+// linux/kernel/resource.c
+struct resource ioport_resource = {
+	.name	= "PCI IO",
+	.start	= 0,
+	.end	= IO_SPACE_LIMIT,
+	.flags	= IORESOURCE_IO,
+};
+
+struct resource iomem_resource = {
+	.name	= "PCI mem",
+	.start	= 0,
+	.end	= -1,
+	.flags	= IORESOURCE_MEM,
+};
+
+/**
+ * __request_region - create a new busy resource region
+ * @parent: parent resource descriptor
+ * @start: resource start address
+ * @n: resource region size
+ * @name: reserving caller's ID string
+ * @flags: IO resource flags
+ */
+struct resource *__request_region(struct resource *parent,
+                                  resource_size_t start, resource_size_t n,
+                                  const char *name, int flags)
+{
+	struct resource *res = alloc_resource(GFP_KERNEL);
+	int ret;
+
+	if (!res)
+		return NULL;
+
+	write_lock(&resource_lock);
+	ret = __request_region_locked(res, parent, start, n, name, flags);
+	write_unlock(&resource_lock);
+
+	if (ret) {
+		free_resource(res);
+		return NULL;
+	}
+
+	if (parent == &iomem_resource)
+		revoke_iomem(res);
+
+	return res;
+}
+
+static int __request_region_locked(struct resource *res, struct resource *parent,
+				   resource_size_t start, resource_size_t n,
+				   const char *name, int flags)
+{
+	DECLARE_WAITQUEUE(wait, current);
+
+	res->name = name;
+	res->start = start;
+	res->end = start + n - 1;
+
+	for (;;) {
+		struct resource *conflict;
+
+		res->flags = resource_type(parent) | resource_ext_type(parent);
+		res->flags |= IORESOURCE_BUSY | flags;
+		res->desc = parent->desc;
+
+		conflict = __request_resource(parent, res);
+		if (!conflict)
+			break;
+		/*
+		 * mm/hmm.c reserves physical addresses which then
+		 * become unavailable to other users.  Conflicts are
+		 * not expected.  Warn to aid debugging if encountered.
+		 */
+		if (parent == &iomem_resource &&
+		    conflict->desc == IORES_DESC_DEVICE_PRIVATE_MEMORY) {
+			pr_warn("Unaddressable device %s %pR conflicts with %pR\n",
+				conflict->name, conflict, res);
+		}
+		if (conflict != parent) {
+			if (!(conflict->flags & IORESOURCE_BUSY)) {
+				parent = conflict;
+				continue;
+			}
+		}
+		if (conflict->flags & flags & IORESOURCE_MUXED) {
+			add_wait_queue(&muxed_resource_wait, &wait);
+			write_unlock(&resource_lock);
+			set_current_state(TASK_UNINTERRUPTIBLE);
+			schedule();
+			remove_wait_queue(&muxed_resource_wait, &wait);
+			write_lock(&resource_lock);
+			continue;
+		}
+		/* Uhhuh, that didn't work out.. */
+		return -EBUSY;
+	}
+
+	return 0;
+}
+
+
+/* Return the conflict entry if you can't request it */
+static struct resource * __request_resource(struct resource *root, struct resource *new)
+{
+	resource_size_t start = new->start;
+	resource_size_t end = new->end;
+	struct resource *tmp, **p;
+
+	if (end < start)
+		return root;
+	if (start < root->start)
+		return root;
+	if (end > root->end)
+		return root;
+	p = &root->child;
+	for (;;) {
+		tmp = *p;
+		if (!tmp || tmp->start > end) {
+			new->sibling = tmp;
+			*p = new;
+			new->parent = root;
+			return NULL;
+		}
+		p = &tmp->sibling;
+		if (tmp->end < start)
+			continue;
+		return tmp;
+	}
+}
+```
+
 ---

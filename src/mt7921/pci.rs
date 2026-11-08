@@ -3,8 +3,6 @@
 //! SPDX-License-Identifier: BSD-3-Clause-Clear
 //! Copyright (C) 2020 MediaTec Inc.
 
-use core::marker::PhantomPinned;
-
 use kernel::devres::Devres;
 use kernel::pci;
 use kernel::prelude::*;
@@ -16,11 +14,12 @@ pub(crate) struct Mt7921 {
 	index: Mt7921Index,
 }
 
-type Bar0 = pci::Bar<{ Regs::END }>;
+type Bar0 = pci::Bar<{ Regs::SIZE }>;
 
 struct Regs;
 impl Regs {
-	const END: usize = 0x10;
+	// 1 MiB
+	const SIZE: usize = 0x100000;
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -67,7 +66,7 @@ impl pci::Driver for Mt7921 {
 			pdev.set_master();
 
 			Ok(try_pin_init!(Self {
-				bar <- pdev.iomap_region_sized::<{ Regs::END }>(0, c"mt76r"),
+				bar <- pdev.iomap_region_sized::<{ Regs::SIZE }>(0, c"mt76r"),
 				index: *id_info,
 			}))
 		})
