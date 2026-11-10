@@ -2,7 +2,9 @@
 
 //! Rust out-of-tree sample
 
+pub(crate) mod mmio;
 pub(crate) mod mt7921;
+pub(crate) mod regs;
 
 kernel::module_pci_driver! {
 	type: mt7921::pci::Mt7921,

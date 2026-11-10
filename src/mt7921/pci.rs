@@ -7,19 +7,15 @@ use kernel::devres::Devres;
 use kernel::pci;
 use kernel::prelude::*;
 
+use crate::mmio::Bar0;
+use crate::regs;
+use crate::mmio::Mt7921Io;
+
 #[pin_data(PinnedDrop)]
 pub(crate) struct Mt7921 {
 	#[pin]
 	bar: Devres<Bar0>,
 	index: Mt7921Index,
-}
-
-type Bar0 = pci::Bar<{ Regs::SIZE }>;
-
-struct Regs;
-impl Regs {
-	// 1 MiB
-	const SIZE: usize = 0x100000;
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -49,7 +45,6 @@ kernel::pci_device_table!(
 	]
 );
 
-
 impl pci::Driver for Mt7921 {
 	type IdInfo = Mt7921Index;
 
@@ -66,7 +61,12 @@ impl pci::Driver for Mt7921 {
 			pdev.set_master();
 
 			Ok(try_pin_init!(Self {
-				bar <- pdev.iomap_region_sized::<{ Regs::SIZE }>(0, c"mt76r"),
+				bar <- pdev.iomap_region_sized::<{ regs::Regs::SIZE }>(0, c"mt76r"),
+				_: {
+					let bar = bar.access(pdev.as_ref())?;
+					let chipid = bar.l1_rr(regs::MT_HW_CHIPID)?;
+					pr_info!("chip id: {:#x}\n", chipid);
+				},
 				index: *id_info,
 			}))
 		})
