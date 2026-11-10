@@ -1614,4 +1614,132 @@ static struct resource * __request_resource(struct resource *root, struct resour
 }
 ```
 
+### MT_HW_CHIPID の読み取り
+
+``` C
+// mt76/mt7921/pci.c
+chipid = mt7921_l1_rr(dev, MT_HW_CHIPID);
+
+// mt76/mt7921/mt79021.h
+static inline u32
+mt7921_l1_rr(struct mt792x_dev *dev, u32 addr)
+{
+	return mt76_rr(dev, mt7921_reg_map_l1(dev, addr));
+}
+
+static inline u32
+mt7921_reg_map_l1(struct mt792x_dev *dev, u32 addr)
+{
+	u32 offset = FIELD_GET(MT_HIF_REMAP_L1_OFFSET, addr);
+	u32 base = FIELD_GET(MT_HIF_REMAP_L1_BASE, addr);
+
+	mt76_rmw_field(dev, MT_HIF_REMAP_L1, MT_HIF_REMAP_L1_MASK, base);
+	/* use read to push write */
+	mt76_rr(dev, MT_HIF_REMAP_L1);
+
+	return MT_HIF_REMAP_BASE_L1 + offset;
+}
+
+// linux/include/linux/bitfield.h
+#define FIELD_GET(_mask, _reg) \
+	({ \
+		__BF_FIELD_CHECK_REG(_mask, _reg, "FIELD_GET: "); \
+		__FIELD_GET(_mask, _reg, "FIELD_GET: "); \
+	})
+
+#define __BF_FIELD_CHECK_REG(mask, reg, pfx) \
+	BUILD_BUG_ON_MSG(__bf_cast_unsigned(mask, mask) > \
+		__bf_cast_unsigned(reg, ~0ull), \
+		pfx "type of reg too small for mask")
+
+#define __FIELD_GET(mask, reg, pfx) \
+	({ \
+		__BF_FIELD_CHECK_MASK(mask, 0U, pfx); \
+		(typeof(mask))(((reg) & (mask)) >> __bf_shf(mask)); \
+	})
+
+// __builtin_ffsll: コンパイラが提供する builtin 関数で、`long long` 型引数の最下位ビットから数えて最初に1が立っている位置を返す
+#define __bf_shf(x) (__builtin_ffsll(x) - 1)
+
+#define __bf_cast_unsigned(type, x) ((__unsigned_scalar_typeof(type))(x))
+
+
+// mt76/mt76.h
+#define mt76_rmw_field(_dev, _reg, _field, _val)	\
+	mt76_rmw(_dev, _reg, _field, FIELD_PREP(_field, _val))
+
+#define mt76_rr(dev, ...)	(dev)->mt76.bus->rr(&((dev)->mt76), __VA_ARGS__)
+#define mt76_rmw(dev, ...)	(dev)->mt76.bus->rmw(&((dev)->mt76), __VA_ARGS__)
+
+// linux/include/linux/bitfield.h
+#define FIELD_PREP(_mask, _val) \
+	({ \
+		__BF_FIELD_CHECK_REG(_mask, 0ULL, "FIELD_PREP: "); \
+		__FIELD_PREP(_mask, _val, "FIELD_PREP: "); \
+	})
+
+#define __FIELD_PREP(mask, val, pfx) \
+	({ \
+		__BF_FIELD_CHECK_MASK(mask, val, pfx); \
+		((typeof(mask))(val) << __bf_shf(mask)) & (mask); \
+	})
+```
+
+#### mt76_mmio の初期化処理
+
+``` C
+// mt76/mmio.c
+void mt76_mmio_init(struct mt76_dev *dev, void __iomem *regs)
+{
+	static const struct mt76_bus_ops mt76_mmio_ops = {
+		.rr = mt76_mmio_rr,
+		.rmw = mt76_mmio_rmw,
+		.wr = mt76_mmio_wr,
+		.write_copy = mt76_mmio_write_copy,
+		.read_copy = mt76_mmio_read_copy,
+		.wr_rp = mt76_mmio_wr_rp,
+		.rd_rp = mt76_mmio_rd_rp,
+		.type = MT76_BUS_MMIO,
+	};
+
+	dev->bus = &mt76_mmio_ops;
+	dev->mmio.regs = regs;
+
+	spin_lock_init(&dev->mmio.irq_lock);
+}
+
+// mt76/mt7921/pci.c
+static int mt7921_pci_probe(...)
+{
+	...
+	regs =  pcim_iomap_region(pdev, 0, pci_name(pdev));
+	...
+	mt76_mmio_init(&dev->mt76, regs);
+	...
+	dev->bus_ops = dev->mt76.bus;
+	...
+	bus_ops->rr = mt7921_rr;
+	bus_ops->wr = mt7921_wr;
+	bus_ops->rmw = mt7921_rmw;
+}
+```
+
+つまり、 `dev->mt76.bus->rr` は `mt76_mmio_rr()`、 `dev->mt76.bus->wr` は `mt76_mmio_wr()`、… となる。
+また、`bus_ops` == `mt76.bus`。
+
+`reg` は `pcim_iomap_region()` で確保したもの。 `Rust` だと `pdev.iomap_region_sized::<{ Regs::SIZE }>()` = `bar` そのもの。
+
+#### regs の readl / writel
+
+``` C
+u32 val = readl(dev->mmio.reg + offset);
+```
+
+↓
+
+``` Rust
+let val = self.read32(offset); // Self == pci::Bar<size>
+let val = self.try_read32(offset)?; // try 版もある
+```
+
 ---
