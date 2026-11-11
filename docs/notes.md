@@ -1742,4 +1742,40 @@ let val = self.read32(offset); // Self == pci::Bar<size>
 let val = self.try_read32(offset)?; // try 版もある
 ```
 
+### まとめ
+
+#### BAR の意味
+
+ - Base Address Register
+ - PCIe デバイスが「必要なサイズ」と「種別（Memory or I/O）」を宣言する
+ - FW や OS が CPU の物理アドレス空間のどこに置くか（ベースアドレス）を書き込む
+
+#### MMIO と RAM の違い
+
+ - Memory Mapped I/O
+	 - CPU が物理メモリアドレス空間を使用して PCIe デバイスのレジスタやメモリ領域にアクセスする手法
+	 - BAR の情報に基づき、 MMIO アドレス空間にデバイスを割り当てる
+	 - 読み書き自体に副作用を持つ（読むとクリアされる、書くと DMA が始まる、など）。そのため、 uncached で扱い、 volatile アクセスや `readl` / `writel` 相当を使い、必要ならバリアも入れる。
+ - Random Access Memory
+	 - デバイスが現在実行しているプログラムやデータを一時的に保存するための揮発性メモリ
+	 - 読み書きに副作用がなく、キャッシュしても、順序を入れ替えても、コンパイラが省略しても問題ない
+ - MMIO の仕組みを用いることで、CPU は RAM へのアクセスと同じ方法で PCIe にアクセスすることができる
+ - ただし、読み書きの副作用に差があるため、MMIO では普通の参照（`&u32` など）ができず、 `readl` / `writel` 相当を使う
+
+#### register offset と BAR offset の違い
+
+ - register offset
+	 - PCIe デバイスやチップ内部のアドレス空間でのレジスタの位置
+	 - データシートやドライバが `mt76_rr(dev, addr)` に渡す `addr` の値 (`MT_HW_CHIPID` など)
+ - BAR offset
+	 - ioremap した BAR の仮想ベースからの実際のオフセット
+	 - `readl(regs + offset)` の `offset` の部分
+	 - `MT_HW_CHIPID` は BAR の固定マップ表にないので、`remap` レジスタに「上位ビット（Base）」を書いて　BAR の窓を移動する(`reg_map_l1()` の `rmw_field()` の処理)。その窓内の位置（`MT_HIF_REMAP_BASE_L1 + 下位 16bit`）が BAR offset となる。
+
+#### register access の lifetime について
+
+ - カーネルモジュールがロードされ、デバイスへ bind された後の、 `probe()` によって BAR がマッピングされている間のみアクセス可能
+ - デバイスから unbind されるとマッピングが解除されるため、アクセスできなくなる
+ - Rust for Linux では、 `Bar` は RAII (Resource Acquisition Is Initialization: リソースの確保は初期化時に行う) で Drop 時にアンマップされる。 `Devres` 経由にすることでデバイスが unbind された後のアクセスはコンパイル/実行時に防がれる。つまり、「Bar への参照は Bar 自体より長く生きられない」という所有権の話として説明できる。
+
 ---
