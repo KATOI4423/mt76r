@@ -42,27 +42,27 @@ impl Mt7921Io for Bar0 {
 		self.rr(self.reg_map_l1(address)?)
 	}
 
-	fn rr(&self, offset: u32) -> Result<u32> {
-		let addr = self.reg_addr(offset)?.try_into()?;
-		self.try_read32(addr)
+	fn rr(&self, reg: u32) -> Result<u32> {
+		let bar_offset = self.reg_addr(reg)?.try_into()?;
+		self.try_read32(bar_offset)
 	}
 
-	fn wr(&self, offset: u32, val: u32) -> Result<()> {
-		let addr = self.reg_addr(offset)?.try_into()?;
-		self.try_write32(val, addr)
+	fn wr(&self, reg: u32, val: u32) -> Result<()> {
+		let bar_offset = self.reg_addr(reg)?.try_into()?;
+		self.try_write32(val, bar_offset)
 	}
 
-	fn rmw(&self, offset: u32, mask: u32, val: u32) -> Result<u32> {
-		let addr = self.reg_addr(offset)?;
+	fn rmw(&self, reg: u32, mask: u32, val: u32) -> Result<u32> {
+		let bar_offset = self.reg_addr(reg)?;
 
-		let val = val | (self.rr(addr)? & !mask);
-		self.wr(addr, val)?;
+		let val = val | (self.rr(bar_offset)? & !mask);
+		self.wr(bar_offset, val)?;
 		Ok(val)
 	}
 
-	fn reg_map_l1(&self, address: u32) -> Result<u32> {
-		let offset = field_get(regs::MT_HIF_REMAP_L1_OFFSET, address);
-		let base = field_get(regs::MT_HIF_REMAP_L1_BASE, address);
+	fn reg_map_l1(&self, reg: u32) -> Result<u32> {
+		let offset = field_get(regs::MT_HIF_REMAP_L1_OFFSET, reg);
+		let base = field_get(regs::MT_HIF_REMAP_L1_BASE, reg);
 
 		self.rmw_field(regs::MT_HIF_REMAP_L1, regs::MT_HIF_REMAP_L1_MASK, base)?;
 		// BAR の窓の移動 (posted write) を read-back で押し出し、反映させてから窓内アクセスさせる
@@ -76,25 +76,25 @@ impl Mt7921Io for Bar0 {
 		self.rmw(reg, field, field_prep(field, val))
 	}
 
-	fn reg_addr(&self, address: u32) -> Result<u32> {
-		if address < 0x100000 {
-			return Ok(address);
+	fn reg_addr(&self, reg: u32) -> Result<u32> {
+		if reg < 0x100000 {
+			return Ok(reg);
 		}
 
 		for fixed in &Mt76ConnacRegMap::FIXED_MAP {
-			match fixed.get_offset(address) {
-				Some(addr) => return Ok(addr),
+			match fixed.get_offset(reg) {
+				Some(bar_offset) => return Ok(bar_offset),
 				None => continue,
 			}
 		}
 
-		match address {
+		match reg {
 			0x18_000_000..0x18_c00_000
 			 | 0x70_000_000..0x78_000_000
 			 | 0x7c_000_000..0x7c_400_000
-				=> self.reg_map_l1(address),
+				=> self.reg_map_l1(reg),
 			_ => {
-				pr_err!("Access currently unsupported address {address:0>8x}\n");
+				pr_err!("Access currently unsupported address {reg:0>8x}\n");
 				Err(EFAULT)
 			}
 		}
