@@ -65,6 +65,7 @@ impl Mt7921Io for Bar0 {
 		let base = field_get(regs::MT_HIF_REMAP_L1_BASE, address);
 
 		self.rmw_field(regs::MT_HIF_REMAP_L1, regs::MT_HIF_REMAP_L1_MASK, base)?;
+		// BAR の窓の移動 (posted write) を read-back で押し出し、反映させてから窓内アクセスさせる
 		self.rr(regs::MT_HIF_REMAP_L1)?;
 
 		Ok(regs::MT_HIF_REMAP_BASE_L1 + offset)
