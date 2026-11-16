@@ -1779,3 +1779,28 @@ let val = self.try_read32(offset)?; // try 版もある
  - Rust for Linux では、 `Bar` は RAII (Resource Acquisition Is Initialization: リソースの確保は初期化時に行う) で Drop 時にアンマップされる。 `Devres` 経由にすることでデバイスが unbind された後のアクセスはコンパイル/実行時に防がれる。つまり、「Bar への参照は Bar 自体より長く生きられない」という所有権の話として説明できる。
 
 ---
+
+## Phase 3 -- DMA
+
+### IOMMU
+
+ - Input/Output Memory management Unit
+ - DMA 可能な I/O バスと主記憶装置を接続するメモリ管理ユニット（MMO）
+ - 機器から見える仮想アドレス（デバイスアドレス、I/O アドレスなどと呼ばれる）を物理アドレスに変換する
+
+```
++-----------------------------+
+|         Main Memory         |
++-----------------------------+
+     ↑ Physical address ↑
++-----------+     +-----------+
+|   IOMMU   |     |    MMU    |
++-----------+     +-----------+
+     ↑ Device           ↑ Virtual
+     |  address         |   address
++-----------+     +-----------+
+|  Device   |     |    CPU    |
++-----------+     +-----------+
+```
+
+---
